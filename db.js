@@ -1,20 +1,26 @@
 const Sequelize = require("sequelize");
 const jwt = require("jsonwebtoken");
+const bcrypt = require('bcrypt')
+const saltRounds = 10;
 const { STRING } = Sequelize;
+
 const config = {
   logging: false,
 };
 if (process.env.LOGGING) {
   delete config.logging;
 }
+
 const conn = new Sequelize(
   process.env.DATABASE_URL || "postgres://localhost/acme_db",
   config
 );
+
 const User = conn.define("user", {
   username: STRING,
   password: STRING,
 });
+
 User.byToken = async (token) => {
   try {
     const decoded = jwt.verify(token, "secret");
@@ -32,22 +38,43 @@ User.byToken = async (token) => {
     throw error;
   }
 };
+
+User.beforeCreate(async (user) => {
+    const hashedPassword = await bcrypt.hash(user.password, saltRounds)
+    user.password = hashedPassword
+})
+
 User.authenticate = async ({ username, password }) => {
+
+    console.log('before findOne here is password', password)
+
   const user = await User.findOne({
     where: {
       username,
-      password,
     },
   });
-  if (user) {
-    const signResult = jwt.sign({ userId: user.id }, process.env.JWT);
-    console.log("this is the sign result -- >", signResult);
-    return jwt.sign({ userId: user.id }, "secret");
+
+  console.log('are we getting user', user)
+  console.log('after findOne here is hashed password', user.password)
+  console.log('after findOne here is password', password)
+
+  const comparedPassword = bcrypt.compare(password, user.password)
+
+  console.log(comparedPassword)
+
+  if (comparedPassword){
+    if (user) {
+        const signResult = jwt.sign({ userId: user.id }, process.env.JWT);
+        console.log("this is the sign result -- >", signResult);
+        return jwt.sign({ userId: user.id }, "secret");
+    }
   }
+
   const error = Error("bad credentials");
   error.status = 401;
   throw error;
 };
+
 const syncAndSeed = async () => {
   await conn.sync({ force: true });
   const credentials = [
@@ -66,6 +93,7 @@ const syncAndSeed = async () => {
     },
   };
 };
+
 module.exports = {
   syncAndSeed,
   models: {
